@@ -35,7 +35,7 @@ const albums = [
   },
   {
     id: 2,
-    title: 'Hoggle Zoology',
+    title: 'Hogle Zoology',
     year: '2024',
     cover: '/photos/hogle-zoo/cover.JPG',
     coverPosition: '35% 40%',
@@ -74,6 +74,27 @@ const albums = [
   },
 ]
 
+const albumCoverPhotos = albums.map(album => album.cover)
+const albumPhotos = albums.flatMap(album => album.columns.flat())
+const aboutPhoto = '/photos/about/IMG%200059%20from%20Google%20Drive.JPG'
+const allPhotos = [...new Set([...workPhotos, ...albumCoverPhotos, ...albumPhotos, aboutPhoto])]
+const displayPhoto = src => src.replace('/photos/', '/photos-optimized/')
+
+function GalleryImage({ className = '', ...props }) {
+  const [loaded, setLoaded] = useState(false)
+
+  return (
+    <img
+      {...props}
+      className={`${className} gallery-image ${loaded ? 'loaded' : ''}`}
+      onLoad={(event) => {
+        setLoaded(true)
+        props.onLoad?.(event)
+      }}
+    />
+  )
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState('works')
   const [selectedAlbum, setSelectedAlbum] = useState(null)
@@ -110,6 +131,28 @@ function App() {
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
   }, [lightbox])
+
+  useEffect(() => {
+    const warmupPhotos = allPhotos
+      .filter(src => !workPhotos.includes(src))
+      .map(displayPhoto)
+    const prefetchLinks = warmupPhotos.map(src => {
+      const link = document.createElement('link')
+      link.rel = 'prefetch'
+      link.as = 'image'
+      link.href = src
+      document.head.appendChild(link)
+      return link
+    })
+
+    if ('serviceWorker' in navigator && import.meta.env.PROD) {
+      navigator.serviceWorker.register('/photo-cache-sw.js').catch(() => {})
+    }
+
+    return () => {
+      prefetchLinks.forEach(link => link.remove())
+    }
+  }, [])
 
   return (
     <div className="app">
@@ -159,7 +202,7 @@ function App() {
                       className="bento-item"
                       onClick={() => openLightbox(workPhotos, workPhotos.indexOf(photo.src))}
                     >
-                      <img src={photo.src} alt={photo.alt} />
+                      <GalleryImage src={displayPhoto(photo.src)} alt={photo.alt} loading="eager" decoding="async" />
                     </div>
                   ))}
                 </div>
@@ -179,7 +222,7 @@ function App() {
                     onClick={() => setSelectedAlbum(album)}
                   >
                     <div className="album-preview">
-                      <img src={album.cover} alt={album.title} style={{ objectPosition: album.coverPosition || 'center 20%' }} />
+                      <GalleryImage src={displayPhoto(album.cover)} alt={album.title} loading="lazy" decoding="async" style={{ objectPosition: album.coverPosition || 'center 20%' }} />
                       <div className="album-info">
                         <h3>{album.title}</h3>
                         <span>{album.year}</span>
@@ -208,7 +251,7 @@ function App() {
                             className="bento-item"
                             onClick={() => openLightbox(albumPhotos, albumPhotos.indexOf(img))}
                           >
-                            <img src={img} alt={`${selectedAlbum.title} ${idx + 1}`} />
+                            <GalleryImage src={displayPhoto(img)} alt={`${selectedAlbum.title} ${idx + 1}`} loading="lazy" decoding="async" />
                           </div>
                         ))}
                       </div>
@@ -223,9 +266,11 @@ function App() {
         {currentPage === 'about' && (
           <section className="about-section">
             <div className="about-photo">
-              <img
-                src="/photos/about/IMG%200059%20from%20Google%20Drive.JPG"
+              <GalleryImage
+                src={displayPhoto(aboutPhoto)}
                 alt="Photographer portrait"
+                loading="lazy"
+                decoding="async"
               />
             </div>
             <div className="about-bio">
@@ -263,7 +308,7 @@ function App() {
           <button className="lightbox-close" onClick={closeLightbox}>✕</button>
           <button className="lightbox-prev" onClick={(e) => { e.stopPropagation(); lightboxPrev() }}>‹</button>
           <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
-            <img src={lightbox.photos[lightbox.index]} alt="" />
+            <img src={lightbox.photos[lightbox.index]} alt="" decoding="async" />
           </div>
           <button className="lightbox-next" onClick={(e) => { e.stopPropagation(); lightboxNext() }}>›</button>
           <div className="lightbox-counter">{lightbox.index + 1} / {lightbox.photos.length}</div>
