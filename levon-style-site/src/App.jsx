@@ -75,10 +75,13 @@ const albums = [
 ]
 
 const albumCoverPhotos = albums.map(album => album.cover)
-const albumPhotos = albums.flatMap(album => album.columns.flat())
 const aboutPhoto = '/photos/about/IMG%200059%20from%20Google%20Drive.JPG'
-const allPhotos = [...new Set([...workPhotos, ...albumCoverPhotos, ...albumPhotos, aboutPhoto])]
 const displayPhoto = src => src.replace('/photos/', '/photos-optimized/')
+const preloadImage = src => {
+  const image = new Image()
+  image.decoding = 'async'
+  image.src = src
+}
 
 function GalleryImage({ className = '', ...props }) {
   const [loaded, setLoaded] = useState(false)
@@ -99,6 +102,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState('works')
   const [selectedAlbum, setSelectedAlbum] = useState(null)
   const [lightbox, setLightbox] = useState(null)
+  const [lightboxImageLoaded, setLightboxImageLoaded] = useState(false)
 
   function goToPage(page) {
     setCurrentPage(page)
@@ -107,17 +111,21 @@ function App() {
 
   function openLightbox(photos, index) {
     setLightbox({ photos, index })
+    setLightboxImageLoaded(false)
   }
 
   function closeLightbox() {
     setLightbox(null)
+    setLightboxImageLoaded(false)
   }
 
   function lightboxNext() {
+    setLightboxImageLoaded(false)
     setLightbox(lb => ({ ...lb, index: (lb.index + 1) % lb.photos.length }))
   }
 
   function lightboxPrev() {
+    setLightboxImageLoaded(false)
     setLightbox(lb => ({ ...lb, index: (lb.index - 1 + lb.photos.length) % lb.photos.length }))
   }
 
@@ -133,26 +141,46 @@ function App() {
   }, [lightbox])
 
   useEffect(() => {
-    const warmupPhotos = allPhotos
-      .filter(src => !workPhotos.includes(src))
-      .map(displayPhoto)
-    const prefetchLinks = warmupPhotos.map(src => {
-      const link = document.createElement('link')
-      link.rel = 'prefetch'
-      link.as = 'image'
-      link.href = src
-      document.head.appendChild(link)
-      return link
-    })
-
     if ('serviceWorker' in navigator && import.meta.env.PROD) {
       navigator.serviceWorker.register('/photo-cache-sw.js').catch(() => {})
     }
 
+    const idleId = window.requestIdleCallback?.(() => {
+      albumCoverPhotos.map(displayPhoto).forEach(preloadImage)
+    }, { timeout: 2500 })
+    const timeoutId = idleId ? null : window.setTimeout(() => {
+      albumCoverPhotos.map(displayPhoto).forEach(preloadImage)
+    }, 1200)
+
     return () => {
-      prefetchLinks.forEach(link => link.remove())
+      if (idleId) window.cancelIdleCallback?.(idleId)
+      if (timeoutId) window.clearTimeout(timeoutId)
     }
   }, [])
+
+  useEffect(() => {
+    if (!selectedAlbum) return
+
+    const preload = () => {
+      selectedAlbum.columns.flat().map(displayPhoto).forEach(preloadImage)
+    }
+    const idleId = window.requestIdleCallback?.(preload, { timeout: 500 })
+    const timeoutId = idleId ? null : window.setTimeout(preload, 150)
+
+    return () => {
+      if (idleId) window.cancelIdleCallback?.(idleId)
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
+  }, [selectedAlbum])
+
+  useEffect(() => {
+    if (!lightbox) return
+
+    const previousIndex = (lightbox.index - 1 + lightbox.photos.length) % lightbox.photos.length
+    const nextIndex = (lightbox.index + 1) % lightbox.photos.length
+    preloadImage(lightbox.photos[previousIndex])
+    preloadImage(lightbox.photos[nextIndex])
+  }, [lightbox])
 
   return (
     <div className="app">
@@ -202,7 +230,13 @@ function App() {
                       className="bento-item"
                       onClick={() => openLightbox(workPhotos, workPhotos.indexOf(photo.src))}
                     >
-                      <GalleryImage src={displayPhoto(photo.src)} alt={photo.alt} loading="eager" decoding="async" />
+                      <GalleryImage
+                        src={displayPhoto(photo.src)}
+                        alt={photo.alt}
+                        loading={photo.id <= 3 ? 'eager' : 'lazy'}
+                        decoding="async"
+                        fetchPriority={photo.id <= 3 ? 'high' : 'auto'}
+                      />
                     </div>
                   ))}
                 </div>
@@ -222,7 +256,14 @@ function App() {
                     onClick={() => setSelectedAlbum(album)}
                   >
                     <div className="album-preview">
-                      <GalleryImage src={displayPhoto(album.cover)} alt={album.title} loading="lazy" decoding="async" style={{ objectPosition: album.coverPosition || 'center 20%' }} />
+                      <GalleryImage
+                        src={displayPhoto(album.cover)}
+                        alt={album.title}
+                        loading="eager"
+                        decoding="async"
+                        fetchPriority="high"
+                        style={{ objectPosition: album.coverPosition || 'center 20%' }}
+                      />
                       <div className="album-info">
                         <h3>{album.title}</h3>
                         <span>{album.year}</span>
@@ -307,8 +348,17 @@ function App() {
         <div className="lightbox" onClick={closeLightbox}>
           <button className="lightbox-close" onClick={closeLightbox}>✕</button>
           <button className="lightbox-prev" onClick={(e) => { e.stopPropagation(); lightboxPrev() }}>‹</button>
-          <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
-            <img src={lightbox.photos[lightbox.index]} alt="" decoding="async" />
+          <div
+            className={`lightbox-content ${lightboxImageLoaded ? 'loaded' : ''}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              key={lightbox.photos[lightbox.index]}
+              src={lightbox.photos[lightbox.index]}
+              alt=""
+              decoding="async"
+              onLoad={() => setLightboxImageLoaded(true)}
+            />
           </div>
           <button className="lightbox-next" onClick={(e) => { e.stopPropagation(); lightboxNext() }}>›</button>
           <div className="lightbox-counter">{lightbox.index + 1} / {lightbox.photos.length}</div>
