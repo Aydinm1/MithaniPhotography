@@ -525,7 +525,7 @@
   .about-photo {
     flex: none;
     width: min(100%, 420px);
-    height: min(520px, 112vw);
+    height: min(470px, 102vw);
   }
 
   .about-bio {
